@@ -11,6 +11,8 @@ import time
 import json
 from io import BytesIO
 
+if 'df' not in st.session_state.keys():
+    st.session_state['df'] = ''
 # images
 
 malari_eye_logo = Image.open('./images/Malaria-Logo.png')
@@ -64,10 +66,26 @@ def get_bounding_box_image(df, image):
         y_max = round(row['ymax'])
         # breakpoint()
         img = cv2.rectangle(img, (x, y), (x_max, y_max), (255,0,0), 2)
-        resized_cells.append(image[x:x_max, y:y_max, :])
+#<<<<<MW        resized_cells.append(image[x:x_max, y:y_max, :])
+#>>>>>MW
+        resized_cells.append(image[y:y_max,x:x_max, :])
     # Add the boxes to the plot
     return img, np.array(resized_cells)
 
+def get_bounding_infected(df, image):
+        resized_cells = []
+        for index, row in df.iterrows():
+            x = round(row['xmin'])
+            y = round(row['ymin'])
+            x_max = round(row['xmax'])
+            y_max = round(row['ymax'])
+#<<<<MW    #breakpoint()
+#<<<<MW    #resized_cells.append(cv2.resize(image[x:x_max, y:y_max,:],(200,200)).tolist())
+#>>>>>MW
+            resized_cells.append(cv2.resize(image[y:y_max,x:x_max,:],(200,200)).tolist())
+#>>>>>MW
+        # Add the boxes to the plot
+        return np.array(resized_cells).astype(np.uint8).flatten()
 ### TABS
 
 tab1, tab2, = st.tabs(["UPLOAD A BLOOD SAMPLE", "CONNECT TO MY CAMERA OR WEBCAM"])
@@ -93,15 +111,15 @@ with tab1: # upload a photo
             if col_text.button(label='CONFIRM AND PROCEED', key=0):
                 st.success('Success! Your sample is being processed...')
                 # API CALL
-                res = requests.post('http://127.0.0.1:8000' + "/upload_image", files={'img': img_bytes})
-                df = pd.DataFrame.from_dict(json.loads(res.content))
-                bounding_boxes, resized_cells = get_bounding_box_image(df, np.asarray(uploaded_sample))
+                res = requests.post('https://malari-eye-ueodddo5aa-ez.a.run.app' + "/upload_image", files={'img': img_bytes})
+                st.session_state['df'] = pd.DataFrame.from_dict(json.loads(res.content))
+                bounding_boxes, resized_cells = get_bounding_box_image(st.session_state['df'], np.asarray(uploaded_sample))
                 im = Image.fromarray(bounding_boxes).convert('RGB')
                 buffered = BytesIO()
                 im.save(buffered, format="JPEG")
                 byte_im = buffered.getvalue()
                 # display bounding_boxes_image with cell count in caption and allow the user to download the file
-                cell_count = df.shape[0]
+                cell_count = st.session_state['df'].shape[0]
                 st.session_state['bounded_image'] = bounding_boxes
                 st.image(image=bounding_boxes)
                 st.write(f'{cell_count} cells have been detected in the sample.')
@@ -129,7 +147,7 @@ with tab2: # take a picture
         if col_button.button('CONFIRM AND PROCEED',key=1):
             st.success('Success! Your sample is being processed...')
             # API CALL
-            res = requests.post('http://127.0.0.1:8000' + "/upload_image", files={'img': img_bytes})
+            res = requests.post('https://malari-eye-ueodddo5aa-ez.a.run.app' + "/upload_image", files={'img': img_bytes})
             df = pd.DataFrame.from_dict(json.loads(res.content))
             bounding_boxes = get_bounding_box_image(df, np.asarray(uploaded_sample))
             im = Image.fromarray(bounding_boxes).convert('RGB')
@@ -151,10 +169,9 @@ with tab2: # take a picture
 
 st.header('Step 2')
 st.text('')
-tab_1 = st.tabs(['DIAGNOSIS GENERATION'])
-with tab_1:
-    st.write('Our model will determine the infection stage of the patient.')
-    st.write('Please click on "generate diagnosis" below to see results.')
+
+st.write('Our model will determine the infection stage of the patient.')
+st.write('Please click on "generate diagnosis" below to see results.')
 
 st.text('')
 st.text('')
@@ -163,15 +180,22 @@ st.text('')
 # when button is pressed, it will run through the if statement depending on whether an infection has been detected
 
 if st.button(label='GENERATE DIAGNOSIS', key=3):
-    categories = df['name'].unique()
+
+    categories = st.session_state['df']['name'].unique()
+    st.write(categories)
 
     if 'infected' not in categories:
         st.success('No parasitaemia detected in sample!')
     else:
-        mask1 = df['name'] == 'uninfected'
-        mask2 = df['name'] == 'leukocyte'
-        df = df.loc[~mask1]
-        df = df.loc[~mask2]
+        mask1 = st.session_state['df']['name'] == 'infected'
+        df_infected = st.session_state['df'][st.session_state['df']['name']=='infected']
+        st.write(df_infected)
+        resized_cells = get_bounding_infected(df_infected, np.asarray(uploaded_sample))
+        st.write(resized_cells.shape)
+        res = requests.post('https://malari-eye-ueodddo5aa-ez.a.run.app' + "/cell_predict", json=json.dumps({"stuff":resized_cells.tolist()}))
+        df = pd.DataFrame(json.loads(res.content).items())
+        st.write(df)
+
 
 # API call with st.progress displayed for the user to get FINAL OUTPUT i.e. table and graph
 
@@ -189,7 +213,7 @@ if st.button(label='GENERATE DIAGNOSIS', key=3):
 
 #### GRAPH
 
-cells_graph = sns.load_dataset(results_df)
-fig = plt.figure(figsize=(10, 4))
-sns.barplot(x=(results_df['columns']), data=results_df)
-st.pyplot(fig)
+# cells_graph = sns.load_dataset(results_df)
+# fig = plt.figure(figsize=(10, 4))
+# sns.barplot(x=(results_df['columns']), data=results_df)
+# st.pyplot(fig)
